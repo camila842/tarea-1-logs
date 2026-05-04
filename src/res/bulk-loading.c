@@ -1,4 +1,4 @@
-#include "include/bulk-loading.h"
+#include "src/include/bulk-loading.h"
 
 int groupsNumber(double N, double b){
     int res = fmod(N,b) == 0 ? N/b : N/b + 1;
@@ -6,10 +6,10 @@ int groupsNumber(double N, double b){
 }
 
 float getMiddleX(Pair *tuple){
-    return (tuple->key->x1 + tuple->key->x2)/(float)2;
+    return (tuple->key.x1 + tuple->key.x2)/(float)2;
 }
 float getMiddleY(Pair *tuple){
-    return (tuple->key->y1 + tuple->key->y2)/(float)2;
+    return (tuple->key.y1 + tuple->key.y2)/(float)2;
 }
 
 Pair *arrayAccorddingToCenters(Pair *parLlaveValor, CenterRectagle *centersArray, int n, float (*func)(Pair *)){
@@ -32,8 +32,8 @@ void minMaxY(Pair *tuples, int n, int *minMax){ //falta hacer función aquí
     int min;
     int max;
     for(int i=0; i<n; i++){
-        int y10 = tuples[i].key->y1;
-        int y20 = tuples[i].key->y2;
+        int y10 = tuples[i].key.y1;
+        int y20 = tuples[i].key.y2;
         int minTuple = y10 <= y20 ? y10 : y20;
         int maxTuple = y10 <= y20 ? y20 : y10;
 
@@ -51,8 +51,8 @@ void mbrNearestX(Node *nodo, Rectangle *mbr){
     //Dado que estarán ordenados, y la forma en que se van guardando
     //(se agrupan desde un arrreglo ordenado lo que hace que recursivamente no se superpongan)
     //solo es necesario buscar en el primero y último.
-    int x1Min = nodo->hijos[0].key->x1;
-    int x2Max = nodo->hijos[nodo->k - 1].key->x1;
+    int x1Min = nodo->hijos[0].key.x1;
+    int x2Max = nodo->hijos[nodo->k - 1].key.x1;
 
     int minMax[2] = {0};
     minMaxY(nodo->hijos,nodo->k,minMax);
@@ -73,10 +73,10 @@ void mbrSTR(Node *nodo, Rectangle *mbr){
     //Dado que estarán ordenados, y la forma en que se van guardando
     //(se agrupan desde un arrreglo ordenado lo que hace que recursivamente no se superpongan)
     //solo es necesario buscar en el primero y último.
-    int x1Min = nodo->hijos[0].key->x1;
-    int x2Max = nodo->hijos[nodo->k - 1].key->x1;
-    int y1Min = nodo->hijos[0].key->y1; 
-    int y2Max = nodo->hijos[nodo->k - 1].key->y2;
+    int x1Min = nodo->hijos[0].key.x1;
+    int x2Max = nodo->hijos[nodo->k - 1].key.x1;
+    int y1Min = nodo->hijos[0].key.y1; 
+    int y2Max = nodo->hijos[nodo->k - 1].key.y2;
 
     Rectangle *rectangle = mbr;
     rectangle->x1 = x1Min;
@@ -85,35 +85,47 @@ void mbrSTR(Node *nodo, Rectangle *mbr){
     rectangle->y2 = y2Max;
 }
 
-void nearestX(Pair *parLlaveValor, int n, RTree **rtree){
+void nearestX(Pair *parLlaveValor, int n, RTree *rtree){
+    printf("[LOG] nearestX: nivel con %d elementos\n", n);
     //centersArray def
-    CenterRectagle array[n];
-    
+    CenterRectagle *array = malloc(sizeof(CenterRectagle) * n);
+    if (!array) {
+        printf("[LOG] ERROR: malloc falló en nearestX (array)\n");
+        return;
+    }
+
     //sort
     Pair *sortedArray = arrayAccorddingToCenters(parLlaveValor,array,n,getMiddleX);
+    free(array);
     int groupsAmount = groupsNumber(n,B);
+    printf("[LOG] nearestX: %d grupos (B=%d)\n", groupsAmount, B);
 
     Pair newChildrenArray[groupsAmount];
-    
-    RTree *tree = *rtree;
+
     //Pair *recRoot;
     for(int i = 0; i < groupsAmount; i++){
         int start = i * B;
         int end = (i+1)*B > n ? n : (i+1)*B;
-        Node *nodo = createNode(sortedArray + start,end - start);
+        Node *nodo = createNode(sortedArray + start,end - start, rtree->tree);
 
-        int nodePosition = addNodeTotree(rtree,nodo);
-        
-        Rectangle mbr[1];
-        mbrNearestX(nodo,mbr);
+        int nodePosition = addNodeTotree(rtree,nodo,NUEVO_NODO);
+        printf("[LOG] nearestX: nodo hoja %d/%d creado (pos=%d, hijos=%d)\n",
+               i+1, groupsAmount, nodePosition, end-start);
+
+        Rectangle mbr;
+        mbrNearestX(nodo,&mbr);
         newChildrenArray[i].key = mbr;
         newChildrenArray[i].value = nodePosition;
+        free(nodo);
     }
     if(groupsAmount <= B){
-        Node *rootNode = createNode(newChildrenArray,groupsAmount);
-        *(tree->root) = *rootNode;
+        printf("[LOG] nearestX: creando raíz con %d hijos\n", groupsAmount);
+        Node *rootNode = createNode(newChildrenArray,groupsAmount,rtree->tree);
+        addNodeTotree(rtree,rootNode,RAIZ);
+        free(rootNode);
     }
     else{
+        printf("[LOG] nearestX: nivel excede B, recursión con %d nodos\n", groupsAmount);
         nearestX(newChildrenArray,groupsAmount,rtree);
     }
 
@@ -127,7 +139,7 @@ int separateInGroupsOf(Pair *group, Pair *elements, int groupElements, int total
     return totalElements - groupElements;
 }
 
-void groups(int n, int elementsPerGroup, int *results){
+void groups(int n, unsigned int elementsPerGroup, int *results){
     int *array = results;
     int res = 0;
     int s = n/elementsPerGroup;
@@ -172,13 +184,19 @@ void groups(int n, int elementsPerGroup, int *results){
     array[2] = res;
 }
 
-void sortTileRecursive(Pair *parLlaveValor, int n, RTree **rtree){
-    CenterRectagle array[n];
+void sortTileRecursive(Pair *parLlaveValor, int n, RTree *rtree){
+    printf("[LOG] STR: nivel con %d elementos\n", n);
+    CenterRectagle *array = malloc(sizeof(CenterRectagle) * n);
+    if (!array) {
+        printf("[LOG] ERROR: malloc falló en nearestX (array)\n");
+        return;
+    }
     Pair *sortedArray = arrayAccorddingToCenters(parLlaveValor,array,n,getMiddleX);
-    //sort
-    
+    free(array);
+
     int S = ceil(sqrt((float)n / B));
-    int elementsPerGroup = sqrt(n*B);
+    unsigned int elementsPerGroup = (unsigned int)sqrt((double)n * B);
+    printf("[LOG] STR: S=%d, elementsPerGroup=%d\n", S, elementsPerGroup);
 
     int leftElements = n;
     int groupNumber = 0;
@@ -189,28 +207,44 @@ void sortTileRecursive(Pair *parLlaveValor, int n, RTree **rtree){
     int s = groupsValues[0];
     int s2 = groupsValues[1];
     int totalNodes = groupsValues[2];
+    printf("[LOG] STR: s=%d, s2=%d, totalNodes=%d\n", s, s2, totalNodes);
 
     int pairsPut = 0;
-    Pair newPairs[totalNodes];
+    Pair *newPairs = malloc(sizeof(Pair) * totalNodes);
+    if (!newPairs) {
+        printf("[LOG] ERROR: malloc falló (newPairs)\n");
+        return;
+    }
 
-    RTree *tree = *rtree;
+    RTree *tree = rtree;
 
 
     //for(int i=0; i<groupsAmount; i++)
     //while (leftElements>0){
     for (int i=0; i<s; i++){
         
-        int start = i * elementsPerGroup;
-        int end = (i+1)*elementsPerGroup > n ? n : (i+1)*elementsPerGroup;
+        unsigned int start = i * elementsPerGroup;
+        unsigned int end = (i+1)*elementsPerGroup > n ? n : (i+1)*elementsPerGroup;
         Pair *beginningOfGroup = sortedArray + start;
 
         int elementsInThisGroup = end - start;
-        Pair grupo[elementsPerGroup];
+        Pair *grupo = malloc(sizeof(Pair) * elementsPerGroup);
+        if (!grupo) {
+            printf("[LOG] ERROR: malloc falló (grupo)\n");
+            free(newPairs);
+            return;
+        }
         leftElements = separateInGroupsOf(grupo,beginningOfGroup,elementsInThisGroup,leftElements);
 
-        CenterRectagle centersY[elementsInThisGroup];
+        CenterRectagle *centersY = malloc(sizeof(CenterRectagle) * elementsInThisGroup);
+        if (!centersY) {
+            printf("[LOG] ERROR: malloc falló (centersY)\n");
+            free(grupo);
+            free(newPairs);
+            return;
+        }
         Pair *sortedArrayGroup = arrayAccorddingToCenters(grupo,centersY,elementsInThisGroup,getMiddleY);
-        //sort
+        free(centersY); 
         
 
         //nuevo grupo
@@ -232,25 +266,34 @@ void sortTileRecursive(Pair *parLlaveValor, int n, RTree **rtree){
             int startSubGroup = j * elementsPerNewGroup;
             int endSubGroup = (j+1)*elementsPerNewGroup > elementsInThisGroup ? elementsInThisGroup : (j+1)*elementsPerNewGroup;
             int elementsInNode = endSubGroup - startSubGroup;
-            Pair *beginningOfNewGroup = grupo + start;
-            newLeftElements = separateInGroupsOf(nuevoGrupo,beginningOfGroup,elementsPerNewGroup,newLeftElements);
+            Pair *beginningOfNewGroup = grupo + startSubGroup;
+            newLeftElements = separateInGroupsOf(nuevoGrupo,beginningOfNewGroup,elementsPerNewGroup,newLeftElements);
 
             //Node *nodo = createNode(sortedArray + i*B*sizeof(Pair),endOfGroup - i*B);
-            Node *nodo = createNode(nuevoGrupo,elementsInNode);
-            int nodePosition = addNodeTotree(rtree,nodo);
-            
-            Rectangle mbr[1];
+            Node *nodo = createNode(nuevoGrupo,elementsInNode,tree->tree);
+            int nodePosition = addNodeTotree(tree,nodo,NUEVO_NODO);
+            printf("[LOG] STR: nodo hoja creado (grupo=%d, subgrupo=%d, pos=%d, hijos=%d)\n",
+                   i+1, j+1, nodePosition, elementsInNode);
+
+            Rectangle *mbr;
             mbrSTR(nodo,mbr);
-            newPairs[pairsPut].key = mbr;
+            newPairs[pairsPut].key = *mbr;
             newPairs[pairsPut].value = nodePosition;
             pairsPut++;
         }
+        free(grupo);
     }
     if(totalNodes <= B){
-        Node *rootNode = createNode(newPairs,totalNodes);
-        *(tree->root) = *rootNode;
+        printf("[LOG] STR: creando raíz con %d hijos\n", totalNodes);
+        // Node *rootNode = createNode(newPairs,totalNodes);
+        // *(tree->root) = *rootNode;
+        Node *rootNode = createNode(newPairs,totalNodes,tree->tree);
+        addNodeTotree(tree,rootNode,RAIZ);
+        free(rootNode);
     }
     else{
+        printf("[LOG] STR: nivel excede B, recursión con %d nodos\n", totalNodes);
         sortTileRecursive(newPairs,totalNodes,rtree);
     }
+    free(newPairs);
 }
